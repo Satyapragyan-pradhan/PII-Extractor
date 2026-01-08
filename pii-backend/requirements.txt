@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+pytesseract
+opencv-python
+pymupdf
+python-docx
+spacy
+rapidfuzz
+pandas
+openpyxl
+python-magic-bin; sys_platform == 'win32'
+python-magic; sys_platform != 'win32'

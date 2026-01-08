@@ -1,0 +1,10 @@
+export function normalizeUser(user) {
+  return {
+    name: user.name?.[0] || "",
+    dob: user.dob?.[0] || "",
+    pan: user.pan?.[0] || "",
+    aadhaar: user.aadhaar?.[0] || "",
+    phone: user.phone?.[0] || "",
+    email: user.email?.[0] || "",
+  };
+}

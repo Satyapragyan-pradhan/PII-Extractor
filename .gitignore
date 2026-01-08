@@ -1,0 +1,31 @@
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+venv/
+
+# ===== Build =====
+dist/
+build/
+
+# ===== Datasets / uploads =====
+datasets/
+samples/
+test_docs/
+uploads/
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== OS =====
+Thumbs.db
+.DS_Store
