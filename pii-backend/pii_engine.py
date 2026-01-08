@@ -14,8 +14,9 @@ import traceback
 from rapidfuzz import fuzz
 from collections import defaultdict
 
-# --- CONFIGURATION ---
-pytesseract.pytesseract.tesseract_cmd = r"C:\Users\SatyaPragyan Pradhan\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+tess_path = os.getenv("TESSERACT_PATH")
+if tess_path:
+    pytesseract.pytesseract.tesseract_cmd = tess_path
 
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -37,7 +38,7 @@ class DocType:
 # In[4]:
 
 def identify_file(file_path: str) -> str:
-    # 1. Check Extension (Most reliable on Windows/Jupyter for known formats)
+    #Extension Based
     ext = os.path.splitext(file_path)[1].lower()
     if ext in ['.png', '.jpg', '.jpeg']: return DocType.IMAGE
     if ext == '.pdf': return DocType.PDF
@@ -60,11 +61,9 @@ def identify_file(file_path: str) -> str:
 
 def production_preprocess(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Bilateral filter removes noise while keeping edges sharp (good for all IDs)
     denoised = cv2.bilateralFilter(gray, 7, 50, 50)
-    # Adaptive thresholding handles varying lighting across different card surfaces
-    thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY, 21, 4)
+    #for varying lighting
+    thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 4)
     return thresh
 
 
@@ -333,16 +332,11 @@ def extract_pii_hybrid(text: str) -> Dict:
 
     results["address"] = [addr] if addr else []
 
-
-
     address_lc = " ".join(results["address"]).lower() if results["address"] else ""
    
-
     lines = [l.strip().replace('"', '').strip(", ") for l in raw_text.split("\n") if l.strip()]
 
     # CARD DOCUMENT DETECTION
-   
-
     def is_card_document(lines):
         short_lines = sum(1 for l in lines if 3 < len(l) < 40)
         id_like = any(re.search(r"\b\d{4}[\s-]?\d{4}\b|\b[A-Z]{2,}\d{4,}\b", l) for l in lines)
@@ -352,7 +346,6 @@ def extract_pii_hybrid(text: str) -> Dict:
 
     # NAME EXTRACTION
    
-
     name_anchors = ["NAME", "APPLICANT", "NOMINEE", "HOLDER"]
     identity_keywords = ["DOB", "DATE OF BIRTH", "BIRTH", "SEX", "GENDER", "VALID", "ISSUE", "EXPIRY"]
 
@@ -361,8 +354,6 @@ def extract_pii_hybrid(text: str) -> Dict:
         "FATHER", "MOTHER", "MALE", "FEMALE"
     ]
     blacklist.extend([s.upper() for s in INDIAN_STATES])
-
-    
 
     #Anchor-based
     for i, line in enumerate(lines):
