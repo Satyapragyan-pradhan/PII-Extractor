@@ -62,7 +62,7 @@ def production_preprocess(image):
 
 
 ADDRESS_KEYWORDS = [
-    "address", "addr", "r/o", "s/o", "d/o","resident","residence","location",
+    "address", "addr", "r/o", "s/o", "d/o","resident","residence","location","apartment","plot",
     "flat", "floor", "building", "block", "sector", "lane", "road",
     "rd", "street", "st", "area", "locality", "village", "po", "ps",
     "dist", "near", "opp", "thikana",
@@ -92,7 +92,7 @@ def extract_address_indian(text: str) -> str:
         if not capturing:
             if any(re.search(rf"\b{kw}\b", line, re.IGNORECASE) for kw in ADDRESS_KEYWORDS):
                 capturing = True
-                clean = re.sub(r"(?i)(address|location|thikana)\s*[:,-]*", "", line).strip()
+                clean = re.sub(r"(?i)(address|location|thikana|Residence|Details)\s*[:,-]*", "", line).strip()
                 if clean: address_parts.append(clean)
                 continue
 
@@ -119,7 +119,7 @@ def extract_name_from_ocr_lines(lines):
     blacklist = {
         "government", "india", "uidai", "income", "tax",
         "department", "address", "male", "female",
-        "year", "birth", "dob"
+        "year", "birth", "dob","Aadhaar", "permanent", "identification",
     }
 
     for line in lines:
@@ -168,17 +168,11 @@ def clean_extracted_address(addr: str) -> str:
 
 
 def clean_text_global(text: str) -> str:
-    # Remove  separators 
     text = re.sub(SEPARATOR_LINE_REGEX, "\n", text)
 
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
-
-
-APPLICANT_BLOCK_REGEX = r"(APPLICANT\s*\d+[:\-]?)"
-
-
 
 
 def count_name_occurrence(name: str, text: str) -> int:
@@ -211,14 +205,17 @@ def extract_address_strict(text: str) -> str:
         m = ADDRESS_LABEL_REGEX.search(line)
         if m:
             addr_parts = []
-
+            
             first = m.group(1).strip()
             if first:
                 addr_parts.append(first)
-
-            # collect next lines until stop condition
+        
             j = i + 1
-            while j < len(lines):
+            temp_parts = addr_parts.copy()
+            word_count = len(" ".join(addr_parts).split())
+            MAX_ADDRESS_WORDS = 35  #assuming max words in address
+            
+            while j < len(lines) and word_count < MAX_ADDRESS_WORDS:
                 stop = re.search(
                     r"\b(pan|aadhaar|dob|gender|mobile|email|name|signature|date)\b",
                     lines[j],
@@ -226,17 +223,40 @@ def extract_address_strict(text: str) -> str:
                 )
                 if stop:
                     break
-
+                
                 if len(lines[j]) < 4:
                     break
-
-                addr_parts.append(lines[j])
+                
+                temp_parts.append(lines[j])
+                word_count = len(" ".join(temp_parts).split())
                 j += 1
-
-            addr = clean_extracted_address(" ".join(addr_parts))
+            
+            # Backward scan 
+            final_idx = -1
+            
+            for idx in range(len(temp_parts) - 1, -1, -1):
+                part = temp_parts[idx]
+                part_lower = part.lower()
+                
+                has_pincode = PIN_REGEX.search(part)
+                has_state = any(state in part_lower for state in INDIAN_STATES)
+                
+                if has_pincode or has_state:
+                    final_idx = idx
+                    break
+            
+            # Reject 
+            if final_idx == -1:
+                continue
+            
+            # Extract only up to the State/Pincode line
+            final_parts = temp_parts[:final_idx + 1]
+            addr = clean_extracted_address(" ".join(final_parts))
+            
+            # Min Length Check
             if len(addr) > 15:
                 return addr
-
+    
     return ""
 def extract_address_near_name(text: str, name: str) -> str:
 
@@ -247,7 +267,7 @@ def extract_address_near_name(text: str, name: str) -> str:
     if idx == -1:
         return ""
 
-    # Look around name (500 chars after, 200 chars before)
+    # check around name 
     window = text[max(0, idx-200): idx+500]
 
     match = re.search(
@@ -278,9 +298,16 @@ def like_real_address(addr: str) -> bool:
     if any(k in addr_lc for k in ["road", "rd", "street", "st", "sector", "block", "flat", "floor", "apartment", "lane"]):
         score += 1
 
-    # Narrative text usually has verbs
-    if re.search(r"\b(was|were|is|are|access|affected|revealed|analysis)\b", addr_lc):
-        score -= 2
+    # INCREASED PENALTY
+    prose_keywords = [
+        "was", "were", "is", "are", "access", "affected", "revealed", 
+        "analysis", "observed", "results", "exposed", "confidential", 
+        "unauthorized", "system", "management", "requirement", "standard"
+    ]
+    
+    for kw in prose_keywords:
+        if re.search(rf"\b{kw}\b", addr_lc):
+            score -= 2 
 
     return score >= 2
 
@@ -446,40 +473,6 @@ def extract_pii_hybrid(text: str) -> Dict:
     results["names"] = list(dict.fromkeys(detected_names))[:1]
 
     return results
-
-
-def build_flat_pii_rows(pages, file_path):
-    rows = []
-    filename = os.path.basename(file_path)
-
-    for page in pages:
-        page_no = page["page_number"]
-        text = page["text"]
-
-        pii = extract_pii_hybrid(text)
-
-        for pii_type, values in pii.items():
-            if not values:
-                continue
-
-            if isinstance(values, str):
-                values = [values]
-
-            for idx, val in enumerate(values, start=1):
-                rows.append({
-                    "file_name": filename,
-                    "page_number": page_no,
-                    "pii_type": pii_type,
-                    "pii_value": val,
-                    "occurrence": idx
-                })
-
-    return {
-        "status": "success",
-        "rows": rows,
-        "filename": filename
-    }
-
 
 def multi_user_grouping(text: str) -> List[Dict]:
 
