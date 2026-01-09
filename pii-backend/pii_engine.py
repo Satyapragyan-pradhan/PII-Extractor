@@ -25,17 +25,12 @@ except:
     nlp = spacy.load("en_core_web_sm")
 
 
-# In[3]:
-
 class DocType:
     IMAGE = "image"
     PDF = "pdf"
     DOCX = "docx"
     EXCEL = "excel"
     UNSUPPORTED = "unsupported"
-
-
-# In[4]:
 
 def identify_file(file_path: str) -> str:
     #Extension Based
@@ -57,8 +52,6 @@ def identify_file(file_path: str) -> str:
         return DocType.UNSUPPORTED
 
 
-# In[5]:
-
 def production_preprocess(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     denoised = cv2.bilateralFilter(gray, 7, 50, 50)
@@ -69,10 +62,10 @@ def production_preprocess(image):
 
 
 ADDRESS_KEYWORDS = [
-    "address", "addr", "resident", "residence", "r/o", "s/o", "d/o",
+    "address", "addr", "r/o", "s/o", "d/o","resident","residence","location",
     "flat", "floor", "building", "block", "sector", "lane", "road",
     "rd", "street", "st", "area", "locality", "village", "po", "ps",
-    "dist", "near", "opp", "thikana", "location"
+    "dist", "near", "opp", "thikana",
 ]
 
 INDIAN_STATES = [
@@ -113,12 +106,11 @@ def extract_address_indian(text: str) -> str:
                 break
 
             if any(s.upper() in upper_line for s in INDIAN_STATES):
-                # Look ahead: if next line has no PIN, stop here
                 if i+1 < len(lines) and not PIN_REGEX.search(lines[i+1]):
                     break
 
     res = " ".join(address_parts).strip()
-    return re.sub(r'\s+', ' ', res) if res else "Not Found"
+    return re.sub(r'\s+', ' ', res) if res else ""
 
 
 def extract_name_from_ocr_lines(lines):
@@ -157,13 +149,6 @@ def extract_name_from_ocr_lines(lines):
     return probable_names
 
 
-# In[30]:
-def split_sentences(text: str) -> List[str]:
-    # Lightweight sentence splitter
-    text = re.sub(r'\n+', '. ', text)
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    return [s.strip() for s in sentences if len(s.strip()) > 5]
-
 # TEXT CLEANUP 
 
 SEPARATOR_LINE_REGEX = r"[-_]{5,}|\.{5,}"
@@ -190,39 +175,16 @@ def clean_text_global(text: str) -> str:
 
     return text.strip()
 
-# MULTI-APPLICANT BLOCK SPLITTER
-
 
 APPLICANT_BLOCK_REGEX = r"(APPLICANT\s*\d+[:\-]?)"
 
-def split_into_applicant_blocks(text: str) -> List[str]:
 
-    matches = list(re.finditer(APPLICANT_BLOCK_REGEX, text, flags=re.IGNORECASE))
-
-    if not matches:
-        return []
-
-    blocks = []
-    for i in range(len(matches)):
-        start = matches[i].start()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        block = text[start:end].strip()
-        if len(block) > 50:
-            blocks.append(block)
-
-    return blocks
 
 
 def count_name_occurrence(name: str, text: str) -> int:
     if not name:
         return 0
     return len(re.findall(rf"\b{re.escape(name)}\b", text, flags=re.IGNORECASE))
-
-FORM_FIELD_STOP_REGEX = re.compile(
-    r"\b(name|pan|aadhaar|dob|gender|mobile|email|declaration|signature|date)\b",
-    re.IGNORECASE
-)
-
 
 
 DOB_NARRATIVE_REGEX = re.compile(
@@ -236,7 +198,6 @@ NARRATIVE_ADDRESS_REGEX = re.compile(
     re.IGNORECASE
 )
 
-OBSERVATION_SPLIT_REGEX = re.compile(r"\bObservation\s+\d+[:\-]?", re.IGNORECASE)
 
 ADDRESS_LABEL_REGEX = re.compile(
     r"\baddress\b\s*[:\-]?\s*(.+)",
@@ -277,13 +238,55 @@ def extract_address_strict(text: str) -> str:
                 return addr
 
     return ""
+def extract_address_near_name(text: str, name: str) -> str:
 
+    if not name:
+        return ""
+
+    idx = text.lower().find(name.lower())
+    if idx == -1:
+        return ""
+
+    # Look around name (500 chars after, 200 chars before)
+    window = text[max(0, idx-200): idx+500]
+
+    match = re.search(
+        r"(residing at|resident of|living at)\s+(.+?)(?:\.|\n)", 
+        window, 
+        re.IGNORECASE
+    )
+
+    if match:
+        addr = match.group(2).strip()
+        addr = clean_extracted_address(addr)
+        return addr
+    return ""
+
+def like_real_address(addr: str) -> bool:
+    if not addr or len(addr) < 15:
+        return False
+
+    score = 0
+    addr_lc = addr.lower()
+
+    if PIN_REGEX.search(addr):
+        score += 2
+
+    if any(s in addr_lc for s in INDIAN_STATES):
+        score += 1
+
+    if any(k in addr_lc for k in ["road", "rd", "street", "st", "sector", "block", "flat", "floor", "apartment", "lane"]):
+        score += 1
+
+    # Narrative text usually has verbs
+    if re.search(r"\b(was|were|is|are|access|affected|revealed|analysis)\b", addr_lc):
+        score -= 2
+
+    return score >= 2
 
 
 def extract_pii_hybrid(text: str) -> Dict:
     raw_text = clean_text_global(text)
-
-    norm_text = raw_text.upper().replace("-", "").replace(" ", "")
 
     patterns = {
         "pan": r"[A-Z]{5}[0-9]{4}[A-Z]",
@@ -296,7 +299,7 @@ def extract_pii_hybrid(text: str) -> Dict:
     }
 
     results = {k: list(set(re.findall(v, raw_text))) for k, v in patterns.items()}
-     # -------- PHONE NORMALIZATION --------
+     #PHONE NORMALIZATION 
     if results.get("phone"):
         norm_phones = []
         for p in results["phone"]:
@@ -327,8 +330,21 @@ def extract_pii_hybrid(text: str) -> Dict:
 
     addr = extract_address_strict(raw_text)
 
+    # Narrative address 
     if not addr:
-      addr = extract_address_indian(raw_text)
+       m = NARRATIVE_ADDRESS_REGEX.search(raw_text)
+       if m:
+         candidate = clean_extracted_address(m.group(2))
+         if like_real_address(candidate):
+            addr = candidate
+
+    # Heuristic Indian address 
+    if not addr:
+        candidate = extract_address_indian(raw_text)
+        if like_real_address(candidate):
+            addr = candidate
+        else:
+            addr = ""
 
     results["address"] = [addr] if addr else []
 
@@ -475,9 +491,29 @@ def multi_user_grouping(text: str) -> List[Dict]:
     user_list = []
     for block in blocks:
         if len(block.strip()) > 30:
-            entities = extract_pii_hybrid(block)
-            if any(entities.values()):
-                user_list.append(entities)
+           entities = extract_pii_hybrid(block)
+
+        # Only accept if strong ID exists
+           has_strong_id = bool(
+            entities.get("aadhaar") 
+            or entities.get("pan")
+            or entities.get("dl")
+            or entities.get("voter_id")
+        )
+
+           if not has_strong_id:
+             continue
+           
+        if entities.get("names"):
+            addr = extract_address_near_name(block, entities["names"][0])
+            if addr:
+                entities["address"] = [addr]
+        else:
+         # if no narrative address near name, drop address from audit text
+             entities["address"] = []
+
+        user_list.append(entities)
+
 
     return user_list
 

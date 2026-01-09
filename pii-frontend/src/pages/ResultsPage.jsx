@@ -1,22 +1,62 @@
 import { useLocation } from "react-router-dom";
 import { Layout } from "../components/Layout";
+import * as XLSX from "xlsx";
+
 
 export default function ResultsPage() {
   const { state } = useLocation();
   const rows = state?.apiResponse?.rows || [];
 
   const downloadExcel = () => {
-    const blob = new Blob(
-      [JSON.stringify(rows, null, 2)],
-      { type: "application/json" }
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "pii_extracted_preview.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!rows.length) return;
+  
+    const formattedRows = rows.map(r => ({
+      "File Name": r.file_name || "",
+      "User Name": r.user_name || "",
+      "Page": r.page_number ?? "",
+      "Occ": r.occurrence ?? "",
+      "Phone": r.phone || "",
+      "Email": r.email || "",
+      "Aadhaar": r.aadhaar || "",
+      "PAN": r.pan || "",
+      "Address": r.address || "",
+      "DL": r.dl || "",
+      "Voter ID": r.voter_id || "",
+      "DOB": r.dob || ""
+    }));
+  
+    const worksheet = XLSX.utils.json_to_sheet(formattedRows);
+
+    const range = XLSX.utils.decode_range(worksheet["!ref"]);
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
+      if (!worksheet[cellAddress]) continue;
+  
+      worksheet[cellAddress].s = {
+        font: { bold: true }
+      };
+    }
+    // column width
+    const colWidths = Object.keys(formattedRows[0]).map((key) => {
+      let maxLen = key.length;
+  
+      formattedRows.forEach(row => {
+        const val = row[key] ? row[key].toString() : "";
+        if (val.length > maxLen) maxLen = val.length;
+      });
+  
+      return { wch: Math.min(maxLen + 2, 60) }; 
+    });
+  
+    worksheet["!cols"] = colWidths;
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "PII Extracted");
+  
+    XLSX.writeFile(workbook, "pii_extracted_preview.xlsx");
   };
+  
+  
 
   return (
     <Layout>
